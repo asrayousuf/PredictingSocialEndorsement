@@ -1,0 +1,10 @@
+### Data files ###
+yelp_dataset/
+mallet-2.0.8/
+*/.ipynb_checkpoints
+.git
+
+# OS generated files #
+######################
+.DS_Store
+.DS_Store?
