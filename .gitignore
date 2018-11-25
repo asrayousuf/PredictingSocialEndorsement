@@ -3,6 +3,8 @@ yelp_dataset/
 mallet-2.0.8/
 */.ipynb_checkpoints
 .git
+50K_Random/categoryData
+50K_Random/.ipynb_checkpoints/
 
 # OS generated files #
 ######################
