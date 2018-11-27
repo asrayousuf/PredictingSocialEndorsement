@@ -46,9 +46,27 @@ class TopicModelVectorizer(TransformerMixin):
         all_reviews_topic_scores = self.topic_scores(reviews)
         topic_vectors = np.array(
             [
-                [tup[1] for tup in review_topic_scores]
+                [tup[1] for tup in sorted(review_topic_scores, key=lambda x: x[0])]
                 for review_topic_scores in all_reviews_topic_scores
             ])
+        if scale:
+            return self.scaler.transform(topic_vectors)
+        else:
+            return topic_vectors
+
+
+class PandasTopicVectorizer(TransformerMixin):
+    def __init__(self):
+        self.scaler = StandardScaler()
+
+    def fit(self, reviews, *args, **kwargs):
+        print(f'WARNING: ignoring {args}, {kwargs}')
+        self.scaler.fit(self.transform(reviews, scale=False))
+        return self
+    
+    def transform(self, reviews, scale=True):
+        columns = sorted([col for col in reviews.columns if col.startswith('Topic #')])
+        topic_vectors = reviews[columns].values
         if scale:
             return self.scaler.transform(topic_vectors)
         else:
