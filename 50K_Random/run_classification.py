@@ -1,9 +1,11 @@
 import argparse
+import os
 
 import numpy as np
 import pandas as pd
 from prettytable import PrettyTable
 
+import eli5
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from sklearn.ensemble import RandomForestClassifier
@@ -15,9 +17,12 @@ from xgboost.sklearn import XGBClassifier
 from topic_utils import load_topic_model, TopicModelVectorizer, PandasTopicVectorizer, Corpus
 from feature_utils import PandasBowVectorizer, OtherReviewFeatures, ReviewerFeatures
 
+
+EXPLAIN_DIR = './explanations_bs'
+
+
 def run_classification(
-    reviews_df, models, vectorizers, limit_inst=None,
-    weight_fn=None, scaler=None, test_df=None
+    reviews_df, models, vectorizers, limit_inst=None, test_df=None, explain=False
 ):
     # Create train-test split
     train_df, val_df = train_test_split(reviews_df, test_size=0.2)
@@ -58,12 +63,6 @@ def run_classification(
         val_vectors = createdVectorizer.transform(val_df)
         if test_df is not None:
             test_vectors = createdVectorizer.transform(test_df)
-        if scaler:
-            createdScaler = scaler()
-            train_vectors = createdScaler.fit_transform(train_vectors)
-            val_vectors = createdScaler.transform(val_vectors)
-            if test_df is not None:
-                test_vectors = createdScaler.transform(test_vectors)
         print('Created vectors')
         train_accs, val_accs, test_accs = [], [], []
         for model in models:
@@ -71,11 +70,7 @@ def run_classification(
                 createdModel = model(max_iter=5000)
             else:
                 createdModel = model()
-
-            if weight_fn:
-                createdModel.fit(train_vectors, trainLabels, sample_weight=weight_fn(train_df))
-            else:
-                createdModel.fit(train_vectors, trainLabels)
+            createdModel.fit(train_vectors, trainLabels)
             print(f'Fit model {model.__name__}')
 
             #Get error stats:
@@ -90,6 +85,13 @@ def run_classification(
             val_accs.append(accuracy_score(valLabels, val_predictions))
             if test_df is not None:
                 test_accs.append(accuracy_score(testLabels, test_predictions))
+
+            if explain and (model == LinearSVC or model == LogisticRegression):
+                explanation = eli5.sklearn.explain_weights.explain_linear_classifier_weights(
+                    createdModel, feature_names=createdVectorizer.get_feature_names())
+                explain_file = os.path.join(EXPLAIN_DIR, f'{model.__name__}_{vectorizer_name}')
+                with open(explain_file, 'w') as f:
+                    f.write(eli5.formatters.html.format_as_html(explanation))
         #Now build the tables:
         max_idx = np.argmax(val_accs)
         train_acc = train_accs[max_idx]
@@ -117,17 +119,28 @@ def create_vectorizer_fns():
     reviewer_fn = lambda: ReviewerFeatures()
     topics_review_fn = lambda: FeatureUnion([
         ('topics', topics_fn()),
-        ('review', OtherReviewFeatures()),
+        ('review', review_fn()),
+    ])
+    topics_reviewer_fn = lambda: FeatureUnion([
+        ('topics', topics_fn()),
+        ('reviewer', reviewer_fn()),
+    ])
+    review_reviewer_fn = lambda: FeatureUnion([
+        ('review', review_fn()),
+        ('reviewer', reviewer_fn()),
     ])
     topics_review_reviewer_fn = lambda: FeatureUnion([
         ('topics', topics_fn()),
-        ('review', OtherReviewFeatures()),
-        ('reviewer', ReviewerFeatures()),
+        ('review', review_fn()),
+        ('reviewer', reviewer_fn()),
     ])
-    return [bow_fn, topics_fn, review_fn, reviewer_fn, topics_review_fn, topics_review_reviewer_fn]
+    return [
+        bow_fn, topics_fn, review_fn, reviewer_fn,
+        topics_review_fn, topics_reviewer_fn, review_reviewer_fn,
+        topics_review_reviewer_fn]
 
 
-def main(data_file, test_file):
+def main(data_file, test_file, explain):
     models = [RandomForestClassifier, LogisticRegression, XGBClassifier, LinearSVC]
     vectorizers = create_vectorizer_fns()
     df = pd.read_csv(data_file)
@@ -135,7 +148,7 @@ def main(data_file, test_file):
         test_df = pd.read_csv(test_file)
     else:
         test_df = None
-    run_classification(df, models, vectorizers, limit_inst=500, test_df=test_df)
+    run_classification(df, models, vectorizers, test_df=test_df, explain=explain)
 
 
 if __name__ == "__main__":
@@ -146,7 +159,8 @@ if __name__ == "__main__":
     #     'topic_model_file', help="Which topic model to use")
     parser.add_argument(
         '-t', '--test-file', default=None, help="Which dataset to use for held-out testing")
+    parser.add_argument(
+        '-e', '--explain', default=False, action="store_true")
 
     args = parser.parse_args()
-    main(args.data_file, args.test_file)
-
+    main(args.data_file, args.test_file, args.explain)
